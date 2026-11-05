@@ -1,0 +1,6 @@
+function runfunctionablation(pt,task)
+Step03_AnalysisAblation
+Step04_SharedModel_and_TemperatureAblation;
+Step04_AperiodicCompAblation;
+Step05_GatherParamsAblation;
+end

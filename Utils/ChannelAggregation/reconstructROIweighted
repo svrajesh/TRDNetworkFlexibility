@@ -1,0 +1,81 @@
+function reconData = reconstructROIweighted(data, ent_selections, reg_labels, roi_list)
+% reconstructROIweighted - computes weighted ROI summary signals using
+% fold-ratio normalized power and entropy+SNR softmax weights.
+%
+% Inputs:
+%   data           - nT x nC matrix of channel power time series (positive)
+%   ent_selections - table with columns:
+%                    Channel | Name | Entropy | SNR
+%   reg_labels     - vector of ROI labels (1 x nC)
+%   roi_list       - list of unique ROIs to reconstruct
+%
+% Output:
+%   reconData      - nT x nROI matrix of weighted ROI time series
+%
+% 2025 update: fold-ratio normalization, geometric mean weighting, softmax normalization.
+
+nT = size(data,1);
+nROI = numel(roi_list);
+reconData = nan(nT, nROI);
+
+% --- Step 0: Fold-ratio normalize each channel ---
+meds = median(data, 1, 'omitnan');
+meds(meds == 0) = eps;
+data_norm = data ./ meds;   % ensures median = 1, preserves rank and positivity
+
+for r = 1:nROI
+    roi = roi_list(r);
+
+    % Find channels belonging to this ROI
+    roi_channels = find(reg_labels == roi);
+    if isempty(roi_channels)
+        warning('No channels found for ROI %d. Skipping.', roi);
+        continue;
+    end
+
+    % Match to ent_selections table
+    [isInTable, tableIdx] = ismember(roi_channels, ent_selections.Channel);
+    if ~any(isInTable)
+        warning('ROI %d has no valid entropy/SNR entries. Skipping.', roi);
+        continue;
+    end
+    roi_channels = roi_channels(isInTable);
+    tableIdx = tableIdx(isInTable);
+
+    % Extract entropy and SNR
+    entropy_vals = ent_selections.Entropy(tableIdx);
+    snr_vals     = ent_selections.SNR(tableIdx);
+
+    % Avoid zeros before log
+    entropy_vals(entropy_vals <= 0) = eps;
+    snr_vals(snr_vals <= 0) = eps;
+
+    % --- Normalize entropy and SNR within ROI using softmax ---
+    e_norm = exp(entropy_vals - max(entropy_vals));
+    e_norm = e_norm ./ sum(e_norm);
+
+    s_norm = exp(snr_vals - max(snr_vals));
+    s_norm = s_norm ./ sum(s_norm);
+
+    % --- Combine via geometric mean ---
+    combined = sqrt(e_norm .* s_norm);
+
+    % --- Final softmax normalization (ensures weights sum to 1) ---
+    z = combined - max(combined);
+    weights = exp(z) ./ sum(exp(z));
+
+    
+
+    % Weighted mean of fold-ratio-normalized channels
+    data_subset = data_norm(:, roi_channels);
+    roi_medians = meds(roi_channels);    % original channel medians
+    roi_scale = sum(weights .* roi_medians(:));   % weighted median
+    reconData(:, r) = (data_subset * weights(:)) * roi_scale;
+
+
+
+
+end
+
+end
+

@@ -1,0 +1,58 @@
+function order = channelEntropies(folder, channelNames)
+% CHANNELENTROPIES computes Shannon entropy (of log power) and SNR (median/MAD)
+% across recordings for each channel.
+%
+% Inputs:
+%   folder - path to folder containing .mat files (each a band-filtered power time series)
+%   channelNames - names of each electrode contact, matching data columns
+%
+% Output:
+%   order - table of channels and their entropy + SNR values
+%
+% 2025 update: entropy computed on log(power), SNR as median/MAD
+
+%% Select Files and Initialize
+files = dir(fullfile(folder, '*.mat'));
+files = files(~startsWith({files.name}, '.'));
+numFiles = numel(files);
+
+results_entropy = [];
+results_snr = [];
+
+%% Loop over recordings
+parfor i = 1:numFiles
+    % Load data matrix (T x N)
+    dataStruct = load(fullfile(folder, files(i).name));
+    dataMatrix = dataStruct.data;
+    dataMatrix = truncate1min(dataMatrix, 2000, 1, []);
+    if ~contains(folder,'raw')
+        
+        % Avoid zeros before log
+        dataMatrix(dataMatrix <= 0) = eps;
+        logPower = log(dataMatrix);
+    else
+        logPower = dataMatrix;
+    end
+    
+    % Shannon entropy on log power (per channel)
+    entropy_values = arrayfun(@(c) shannon(logPower(:, c)), 1:size(logPower, 2));
+    
+    % Robust SNR = median / MAD
+    snr_values = arrayfun(@(c) median(abs(dataMatrix(:, c))) / mad(dataMatrix(:, c), 1), 1:size(dataMatrix, 2));
+    
+    results_entropy(i, :) = entropy_values;
+    results_snr(i, :) = snr_values;
+end
+
+%% Aggregate across recordings
+
+median_entropy = median(results_entropy, 1, 'omitnan');
+median_snr = median(results_snr, 1, 'omitnan');
+
+%% Sort by entropy
+[sorted_entropy, idx] = sort(median_entropy, 'descend');
+
+order = table(idx', channelNames(idx), sorted_entropy', median_snr(idx)', 'VariableNames', {'Channel', 'Name', 'Entropy', 'SNR'});
+end
+
+
